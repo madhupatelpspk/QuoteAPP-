@@ -75,6 +75,11 @@ textarea{
     transform:scale(1.05);
 }
 
+.post-btn:disabled{
+    opacity:0.5;
+    cursor:not-allowed;
+}
+
 .feed{
     display:flex;
     flex-direction:column;
@@ -99,6 +104,12 @@ textarea{
 .quote{
     font-size:18px;
     line-height:1.7;
+}
+
+.author{
+    margin-top:8px;
+    color:#999;
+    font-size:12px;
 }
 
 .time{
@@ -139,6 +150,12 @@ textarea{
     color:#ff4444;
 }
 
+.loading{
+    text-align:center;
+    color:#777;
+    padding:20px;
+}
+
 @keyframes fadeUp{
     from{
         opacity:0;
@@ -165,29 +182,71 @@ textarea{
 <body>
 
 <header>
-✨ Madhu Patel 
+✨ Madhu Patel - Shared Quotes
 </header>
 
 <div class="container">
 
 <div class="post-box">
 <textarea id="quoteInput" placeholder="What's on your mind today?"></textarea>
-<button class="post-btn" onclick="addQuote()">Post Quote</button>
+<button class="post-btn" id="postBtn" onclick="addQuote()">Post Quote</button>
 </div>
 
 <div class="feed" id="feed">
-
+<div class="loading">Loading quotes...</div>
 </div>
 
 </div>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
 
 <script>
 
-// Load quotes from localStorage on page load
+// TODO: Replace with your Firebase config
+const firebaseConfig = {
+    apiKey: "AIzaSyD1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    authDomain: "your-project.firebaseapp.com",
+    databaseURL: "https://your-project.firebaseio.com",
+    projectId: "your-project",
+    storageBucket: "your-project.appspot.com",
+    messagingSenderId: "123456789",
+    appId: "1:123456789:web:abcdefghijklmnopqr"
+};
+
+// Initialize Firebase
+const app = firebase.initializeApp(firebaseConfig);
+const db = firebase.database(app);
+
+// Reference to quotes in database
+const quotesRef = db.ref("quotes");
+
+// Load quotes from Firebase on page load
 function loadQuotes(){
-    let quotes = JSON.parse(localStorage.getItem("quotes")) || [];
-    quotes.forEach(quote => {
-        renderQuote(quote);
+    const feed = document.getElementById("feed");
+    feed.innerHTML = '<div class="loading">Loading quotes...</div>';
+    
+    quotesRef.orderByChild("timestamp").limitToLast(50).on("value", (snapshot) => {
+        feed.innerHTML = "";
+        
+        if(!snapshot.exists()){
+            feed.innerHTML = '<div class="loading">No quotes yet. Be the first to share!</div>';
+            return;
+        }
+        
+        const quotes = [];
+        snapshot.forEach((childSnapshot) => {
+            quotes.push({
+                id: childSnapshot.key,
+                ...childSnapshot.val()
+            });
+        });
+        
+        // Display in reverse order (newest first)
+        quotes.reverse().forEach(quote => {
+            renderQuote(quote);
+        });
     });
 }
 
@@ -198,13 +257,14 @@ function renderQuote(quote){
     card.dataset.id = quote.id;
     
     card.innerHTML = `
-        <button class="delete-btn" onclick="deleteQuote(${quote.id})">✕</button>
+        <button class="delete-btn" onclick="deleteQuote('${quote.id}')">✕</button>
         <div class="quote">"${quote.text}"</div>
-        <div class="time">${quote.time}</div>
+        <div class="author">~ ${quote.author || "Anonymous"}</div>
+        <div class="time">${new Date(quote.timestamp).toLocaleString()}</div>
         <div class="actions">
-            <span>❤️ 0</span>
-            <span>💬 0</span>
-            <span>🔁 0</span>
+            <span>❤️ ${quote.likes || 0}</span>
+            <span>💬 ${quote.comments || 0}</span>
+            <span>🔁 ${quote.shares || 0}</span>
         </div>
     `;
     
@@ -215,42 +275,46 @@ function renderQuote(quote){
 function addQuote(){
     let input = document.getElementById("quoteInput");
     let text = input.value.trim();
+    let btn = document.getElementById("postBtn");
     
     if(text === "") return;
     
+    btn.disabled = true;
+    btn.textContent = "Posting...";
+    
     // Create quote object
     let quote = {
-        id: Date.now(),
         text: text,
-        time: new Date().toLocaleString()
+        author: "Anonymous",
+        timestamp: Date.now(),
+        likes: 0,
+        comments: 0,
+        shares: 0
     };
     
-    // Get existing quotes from localStorage
-    let quotes = JSON.parse(localStorage.getItem("quotes")) || [];
-    
-    // Add new quote to array
-    quotes.unshift(quote);
-    
-    // Save back to localStorage
-    localStorage.setItem("quotes", JSON.stringify(quotes));
-    
-    // Render on page
-    renderQuote(quote);
-    
-    // Clear input
-    input.value = "";
+    // Push to Firebase
+    quotesRef.push(quote)
+        .then(() => {
+            input.value = "";
+            btn.disabled = false;
+            btn.textContent = "Post Quote";
+        })
+        .catch((error) => {
+            console.error("Error posting quote:", error);
+            alert("Failed to post quote. Check Firebase config.");
+            btn.disabled = false;
+            btn.textContent = "Post Quote";
+        });
 }
 
 // Delete a quote
 function deleteQuote(id){
     if(confirm("Are you sure you want to delete this quote?")){
-        // Remove from DOM
-        document.querySelector(`[data-id="${id}"]`).remove();
-        
-        // Remove from localStorage
-        let quotes = JSON.parse(localStorage.getItem("quotes")) || [];
-        quotes = quotes.filter(q => q.id !== id);
-        localStorage.setItem("quotes", JSON.stringify(quotes));
+        quotesRef.child(id).remove()
+            .catch((error) => {
+                console.error("Error deleting quote:", error);
+                alert("Failed to delete quote");
+            });
     }
 }
 
